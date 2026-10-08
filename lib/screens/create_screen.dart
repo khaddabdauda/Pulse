@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import 'package:flutter/material.dart';
 
@@ -291,5 +292,110 @@ class _CreateScreenState extends State<CreateScreen> {
     );
 
   }
+
+
+  Future<void> createPost() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in before posting.'),
+        ),
+      );
+      return;
+    }
+
+    final file = selectedFile;
+    if (file == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a photo or video first.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      uploading = true;
+    });
+
+    try {
+      final fileName = file.path
+          .split(Platform.pathSeparator)
+          .last
+          .replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final storagePath =
+          'posts/${user.uid}/${timestamp}_$fileName';
+
+      final storageRef =
+          FirebaseStorage.instance.ref().child(storagePath);
+
+      final metadata = SettableMetadata(
+        contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+      );
+
+      await storageRef.putFile(file, metadata);
+
+      final mediaUrl = await storageRef.getDownloadURL();
+
+      await FirebaseFirestore.instance.collection('posts').add({
+        'userId': user.uid,
+        'caption': captionController.text.trim(),
+        'mediaUrl': mediaUrl,
+        'mediaType': isVideo ? 'video' : 'image',
+        'createdAt': FieldValue.serverTimestamp(),
+        'likes': 0,
+        'comments': 0,
+      });
+
+      if (!mounted) return;
+
+      captionController.clear();
+
+      setState(() {
+        selectedFile = null;
+        isVideo = false;
+        uploading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Post published successfully.'),
+        ),
+      );
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        uploading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.message ?? 'Unable to publish the post.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        uploading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to publish the post. Please try again.'),
+        ),
+      );
+    }
+  }
+
 
 }
